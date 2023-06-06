@@ -1,0 +1,68 @@
+name: Project SAP Pipeline
+
+# Controls when the action will run. 
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+      - shell: bash
+        env: 
+          SUPER_SECRET: ${{secrets.KUBE_CONFIG}}
+        run: |
+          mkdir $HOME/.kube
+          echo "$SUPER_SECRET" |  base64 --decode > $HOME/.kube/config
+      # Runs a single command using the runners shell
+      - name: Install Helm
+        run: |
+           ls -la 
+           curl https://baltocdn.com/helm/signing.asc | sudo apt-key add -
+           sudo apt-get install apt-transport-https --yes
+           echo "deb https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+           sudo apt-get update
+           sudo apt-get install helm
+        
+      # Intstall kubetctl
+      - name: Intstall kubetctl
+        run: | 
+          sudo apt-get update
+          sudo apt-get install -y apt-transport-https ca-certificates curl
+          sudo curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+          sudo apt-get update
+          sudo apt-get install -y kubectl
+      - name: Setup kubeconfig
+        run: |
+          kubectl config use-context shoot--sonar-dev--exam-gcp
+      # Install nginc controller
+      - name: Install ingress controller
+        run: |
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo update
+          # Executed only first time when you rin the pipeline
+          #kubectl create namespace nginx
+          helm upgrade -i -n nginx tsvety-controller-nginx ingress-nginx/ingress-nginx
+  
+      # Build and test App Docker Image
+      - name: Build NGINX Docker Image
+        run: |
+          cd nginx/docker
+          docker login -u="koleva" -p="dckr_pat_esXjpvM2RKWgSeJ9fwuu1h0FFFo"
+          docker build --tag nginx-app-new .
+          docker tag nginx-app-new koleva/sap-repo:nginx-app-new
+          docker push koleva/sap-repo:nginx-app-new
+      # Deploy nginx
+      - name: Deploy nginx
+        run: |
+          docker login -u="koleva" -p="dckr_pat_esXjpvM2RKWgSeJ9fwuu1h0FFFo"
+          kubectl apply -f nginx/nginx.yaml
